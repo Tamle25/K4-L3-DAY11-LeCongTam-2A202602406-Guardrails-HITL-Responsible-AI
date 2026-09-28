@@ -39,18 +39,33 @@ async def chat_with_agent(agent, runner, user_message: str, session_id=None):
                 app_name=app_name, user_id=user_id
             )
 
+    import asyncio
+
     content = types.Content(
         role="user",
         parts=[types.Part.from_text(text=user_message)],
     )
 
-    final_response = ""
-    async for event in runner.run_async(
-        user_id=user_id, session_id=session.id, new_message=content
-    ):
-        if hasattr(event, "content") and event.content and event.content.parts:
-            for part in event.content.parts:
-                if hasattr(part, "text") and part.text:
-                    final_response += part.text
+    for attempt in range(5):
+        try:
+            curr_session = session
+            uid = f"{user_id}_{attempt}" if attempt > 0 else user_id
+            if curr_session is None or attempt > 0:
+                curr_session = await runner.session_service.create_session(
+                    app_name=app_name, user_id=uid
+                )
+            final_response = ""
+            async for event in runner.run_async(
+                user_id=uid, session_id=curr_session.id, new_message=content
+            ):
+                if hasattr(event, "content") and event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            final_response += part.text
 
-    return final_response, session
+            return final_response, curr_session
+        except Exception:
+            if attempt < 4:
+                await asyncio.sleep(5.0 * (attempt + 1))
+                continue
+            raise
